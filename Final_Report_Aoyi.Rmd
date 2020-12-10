@@ -1,0 +1,279 @@
+---
+title: "Final Project"
+author: 'AOYI LI'
+date: "2020/12/3"
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+getwd()
+library(lme4)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(stringr)
+library(tidyverse)
+library(knitr)
+library(readr)
+library(MASS)
+library(rstanarm)
+library(sjPlot)
+library(glmmTMB)
+library(dplyr)
+
+rm(list = ls())
+```
+
+
+#Data Processing
+```{r}
+rawdata<-read.csv("merge.data.csv")
+colnames(rawdata)
+
+#exclude NA rows
+data_full<-rawdata[complete.cases(rawdata), ]
+
+#Delete unnecessary columns
+data<-data_full[,-c(1,8,14,16)]
+data_w_name<-data_full[,-c(1,8)]
+
+#check popularity
+data$popularity<-as.integer(as.character(data$popularity))
+
+data_w_name$popularity<-as.integer(as.character(data_w_name$popularity))
+
+summary(data_w_name$popularity)
+summary(data$popularity)
+
+#filter out unnecessary rows
+data<-data%>%filter(data$popularity!=0)
+data<-data%>%filter(!is.na(data$popularity))
+
+#get numerical subset of the data
+num.data=data[,-c(2,17)]
+
+#add decades
+data <- data %>% mutate(decade = as.numeric(str_sub(year,1,3))*10)
+```
+
+
+#EDA
+##Pairwise Relationship
+###correlation matrix
+```{r}
+cor <- cor(num.data)
+corrplot(cor)
+"cor of popularity:";cor[11,]
+```
+###matrix plot
+```{r}
+#matrix plot
+pairs(~popularity+acousticness+danceability+duration_ms+energy+instrumentalness,data=num.data,col="dodgerblue3")
+pairs(~popularity+liveness+loudness+speechiness+tempo+valence+year,data=num.data,col="dodgerblue3")
+```
+
+##Top 10 songs based on popularity
+```{r}
+top_ten <- data_w_name %>% arrange(desc(popularity)) %>% head(10,popularity)
+
+top_ten <- subset(top_ten, select = c("name","artists","duration_ms","year","genres","popularity"))
+kable(top_ten)
+```
+
+##Data visualization with Popularity
+
+```{r}
+#quantile check
+quantile(data$popularity, c(.95)) 
+quantile(data$popularity, c(.05))
+summary(data$popularity)
+
+#histogram of popularity
+ggplot(data,aes(popularity)) + geom_histogram(bins=80, fill="dodgerblue3", alpha=0.5) + geom_vline(xintercept = mean(data$popularity,na.rm = TRUE),colour="blue")+ geom_vline(xintercept = quantile(data$popularity, prob = c(0.05)),colour="red",linetype = "longdash")+ geom_vline(xintercept = quantile(data$popularity, prob = c(0.95)),colour="red",linetype = "longdash") + ggtitle("Histogram of Popularity",subtitle = "show top&bottom 5% and mean")+theme(plot.title = element_text(face = "bold")) + theme(legend.position = "none")+
+  annotate("text",x = 9, y = 4000, label = "7",color = "red") + annotate("text",x = 65, y = 4000, label = "67",color = "red") +annotate("text",x = 34, y = 4500, label = "38.19",color = "blue")+theme_bw() 
+
+#Boxplot for popularity(check outlier)
+boxplot(data$popularity,
+  ylab = "popularity",
+  main = "Boxplot of Popularity"
+)
+out <- boxplot.stats(data$popularity)$out
+mtext(paste("Outliers: ", paste(out, collapse = ", ")))
+
+#number of songs have popularity > 89
+sum(data$popularity>89)
+
+#density of mean popularity by artists
+pop_by_artists <- data %>%
+  group_by(artists) %>%
+  summarise(mean_pop_by_artists <- mean(popularity))
+pop_by_artists<-data.frame(pop_by_artists)
+plot(density(pop_by_artists[,2]),main = "Density of mean Popularity by artists")
+
+#density of mean popularity by genres
+
+pop_by_genres <- data %>%
+  group_by(genres) %>%
+  summarise(mean_pop_by_genres <- mean(popularity))
+pop_by_genres<-data.frame(pop_by_genres)
+plot(density(pop_by_genres[,2]),main = "Density of mean Popularity by genres")
+
+```
+
+##Relationships with popularity
+```{r}
+#relationship between popularity and year 
+ggplot(data=data,aes(year,popularity)) + geom_point(color = ifelse(data$popularity>67, "red", "royalblue3"), size = 2,alpha=0.2)+ geom_smooth(color='tomato3',se=FALSE,alpah=0.2)
+
+#Divide duration into 4 groups
+data1<-data
+data1$duration_ms<-cut(data1$duration_ms, quantile(data1$duration_ms, c(0,1/4, 1/2 ,3/4,1))) 
+
+#popularity and acousticness by decade
+ggplot(data, aes(acousticness, popularity)) + geom_point(aes(color = factor(decade))) + geom_smooth(se = FALSE, color = "dodgerblue3") + ggtitle("Popularity vs. Acousticness")+theme(plot.title = element_text(face = "bold")) + theme_bw()
+
+#popularity and acousticness by duration
+data1 %>%  ggplot(aes(acousticness,popularity))+geom_smooth(aes(color=duration_ms),se=FALSE) + ggtitle("Popularity VS. Acousticness")+theme(plot.title = element_text(face = "bold")) + theme_bw()
+
+#population and energy by duration
+data1 %>%  ggplot(aes(energy,popularity))+geom_smooth(aes(color=duration_ms),se=FALSE) + ggtitle("Popularity VS. Energy")+theme(plot.title = element_text(face = "bold")) + theme_bw()
+
+```
+
+## density plots for each of the numerical variables
+
+```{r}
+
+par(mfrow=c(2,3))
+i = 1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = paste("y : ",colnames(num.data)[i]))
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+plot(density(num.data[,i]),main = colnames(num.data)[i])
+i = i+1
+par(mfrow=c(1,1))
+```
+
+#Modeling part
+```{r}
+#split data into training and test (using a subset of the data)
+data=data.frame(data)
+set.seed(111)
+ind <- sample(c(TRUE, FALSE), 134673, replace=TRUE, prob=c(0.2, 0.8))
+data_sub <- data[ind, ]
+
+num.data=data_sub[,-c(2,17)]
+
+```
+
+##Linear Model
+```{r}
+fit_1<-lm(popularity~acousticness+danceability+duration_ms+energy+instrumentalness+liveness+loudness+speechiness+tempo+valence+year+factor(genres),data=data_sub)
+summary(fit_1)
+
+fit_2<-lm(popularity~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+year+factor(genres),data=data_sub)
+summary(fit_2)
+
+par(mfrow=c(1,1))
+boxcox(fit_2,lambda=seq(0,1,length=20))
+
+#transform popularity
+tpop<- data$popularity^0.82
+tpop_s<-data_sub$popularity^0.82
+data<-data%>%mutate(tpop=tpop)
+data_sub<-data_sub%>%mutate(tpop=tpop_s)
+
+fit_3<-lm(tpop~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+year+factor(genres),data=data_sub)
+summary(fit_3)
+
+#add interaction terms
+fit_final<-lm(tpop~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+year+factor(genres)+acousticness*energy,data=data_sub)
+summary(fit_final)
+
+par(mfrow=c(2,2))
+plot(fit_final,col="#3186ff")
+```
+
+##Multilevel Model
+```{r}
+#random effect:genre
+
+fit_m1<-lmer(data=data_sub, tpop~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+year+acousticness*energy+(1|genres))
+summary(fit_m1)
+
+#allow for varying slopes for year predictor
+fit_m2<- lmer(data=data_sub, tpop~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+year+acousticness*energy+(1+year|genres))
+summary(fit_m2)
+
+#different coefficients for each year point
+fit_m3<- lmer(data=data_sub, tpop~acousticness+danceability+energy+instrumentalness+liveness+loudness+speechiness+factor(year)+acousticness*energy+(1|genres))
+summary(fit_m3)
+
+plot(fit_m1)
+plot(fit_m2)
+plot(fit_m3)
+
+#anova test
+anova(fit_m1,fit_final,fit_m2,fit_m3)
+anova(fit_m1,fit_m2,fit_m3)
+anova(fit_m2,fit_m3)
+
+#check MSE
+model_sum1 <-summary(fit_final)
+mean(model_sum1$residuals^2)
+model_summ1 <-summary(fit_m1)
+mean(model_summ1$residuals^2)
+model_summ2 <-summary(fit_m2)
+mean(model_summ2$residuals^2)
+model_summ3 <-summary(fit_m3)
+mean(model_summ3$residuals^2)
+
+#predict vs. actual plot
+plot(predict(fit_m3),data_sub$popularity,
+      xlab="predicted",ylab="actual")
+abline(a=0,b=1,col="red")
+
+#Model check
+library(performance)
+check_model(fit_m3)
+
+plot(fit_m3)
+
+
+```
+
+
+
